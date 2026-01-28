@@ -46,7 +46,7 @@ source .venv/bin/activate
 
 First, make sure you download the simulation assets into the root of this directory
 ```bash
-uvx hf download owhan/DROID-sim-environments --repo-type=dataset
+uvx hf download owhan/DROID-sim-environments --repo-type dataset --local-dir assets
 ```
 
 Then, in a separate terminal, launch the policy server on `localhost:8000`. 

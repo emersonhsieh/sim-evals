@@ -71,7 +71,7 @@ def get_bounding_box(rigid_body):
         return {"error": str(e)}
 
 
-def main():
+def main(scene: int = 1):
     # Launch omniverse app
     from isaaclab.app import AppLauncher
     parser = argparse.ArgumentParser()
@@ -95,20 +95,22 @@ def main():
 
     all_bbox_data = {}
 
-    for scene_num in [1, 2, 3]:
-        print(f"\n{'='*70}")
-        print(f"EXTRACTING BOUNDING BOXES FOR SCENE {scene_num}")
-        print('='*70)
+    print(f"\n{'='*70}")
+    print(f"EXTRACTING BOUNDING BOXES FOR SCENE {scene}")
+    print('='*70)
 
-        # Initialize env for this scene
-        env_cfg = parse_env_cfg("DROID", device=args_cli.device, num_envs=1, use_fabric=True)
-        env_cfg.set_scene(scene_num)
-        env = gym.make("DROID", cfg=env_cfg)
+    # Initialize env for this scene
+    env_cfg = parse_env_cfg("DROID", device=args_cli.device, num_envs=1, use_fabric=True)
+    env_cfg.set_scene(scene)
+    env = gym.make("DROID", cfg=env_cfg)
 
-        obs, _ = env.reset()
-        obs, _ = env.reset()  # Second reset for materials
+    obs, _ = env.reset()
+    obs, _ = env.reset()  # Second reset for materials
 
-        target_name, container_name = scene_containers[scene_num]
+    target_name, container_name = scene_containers[scene]
+
+    if True:  # Keep indentation for compatibility
+        scene_num = scene
 
         print(f"\nScene {scene_num} objects:")
         print(f"  Target: {target_name}")
@@ -168,12 +170,12 @@ def main():
             else:
                 print(f"  ✗ Could not find {container_name}")
 
-        all_bbox_data[f"scene_{scene_num}"] = scene_data
+    all_bbox_data[f"scene_{scene_num}"] = scene_data
 
-        env.close()
+    env.close()
 
     # Save bounding box data
-    output_file = Path("bounding_boxes.json")
+    output_file = Path(f"bounding_boxes_scene{scene}.json")
     with open(output_file, 'w') as f:
         json.dump(all_bbox_data, f, indent=2)
 
@@ -183,21 +185,23 @@ def main():
     print(f"Bounding box data saved to: {output_file}")
     print("\nRecommended updates for check_task_success():")
 
-    for scene_num in [1, 2, 3]:
-        scene_key = f"scene_{scene_num}"
-        if scene_key in all_bbox_data:
-            scene_data = all_bbox_data[scene_key]
-            container_bbox = scene_data.get("container_bbox", {})
+    scene_key = f"scene_{scene_num}"
+    if scene_key in all_bbox_data:
+        scene_data = all_bbox_data[scene_key]
+        container_bbox = scene_data.get("container_bbox", {})
 
-            if 'dimensions' in container_bbox:
-                dims = container_bbox['dimensions']
-                horizontal_threshold = max(dims[0], dims[1]) / 2
-                height_threshold = dims[2] / 2
+        if 'dimensions' in container_bbox:
+            dims = container_bbox['dimensions']
+            horizontal_threshold = max(dims[0], dims[1]) / 2
+            height_threshold = dims[2] / 2
 
-                print(f"\nScene {scene_num} ({scene_data['container_name']}):")
-                print(f"  HORIZONTAL_THRESHOLD = {horizontal_threshold:.3f}  # Container radius")
-                print(f"  HEIGHT_THRESHOLD_MIN = -{height_threshold:.3f}  # Bottom of container")
-                print(f"  HEIGHT_THRESHOLD_MAX = +{height_threshold:.3f}  # Top of container")
+            print(f"\nScene {scene_num} ({scene_data['container_name']}):")
+            print(f"  HORIZONTAL_THRESHOLD = {horizontal_threshold:.3f}  # Container radius")
+            print(f"  HEIGHT_THRESHOLD_MIN = -{height_threshold:.3f}  # Bottom of container")
+            print(f"  HEIGHT_THRESHOLD_MAX = +{height_threshold:.3f}  # Top of container")
+        else:
+            print(f"\nNote: Could not extract dimensions for scene {scene}")
+            print("Center positions shown above can still help validate thresholds")
 
     simulation_app.close()
 

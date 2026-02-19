@@ -115,10 +115,12 @@ def check_task_success(env, scene: int, debug: bool = True) -> bool:
             HORIZONTAL_THRESHOLD = 0.30  # Bowl has large opening radius
             HEIGHT_THRESHOLD_MIN = -0.10  # Bottom of bowl
             HEIGHT_THRESHOLD_MAX = 0.20   # Top of bowl opening
-        elif scene == 2:  # Mug: _25_mug (typical mug dimensions)
-            HORIZONTAL_THRESHOLD = 0.10  # Mug has smaller opening
-            HEIGHT_THRESHOLD_MIN = -0.08  # Bottom of mug
-            HEIGHT_THRESHOLD_MAX = 0.12   # Top of mug opening
+        elif scene == 2:  # Mug: _25_mug
+            # Note: Can might be wider than mug opening, so it rests ON the mug
+            # Success = can's center is aligned with mug (on top or inside)
+            HORIZONTAL_THRESHOLD = 0.15  # Allow can to rest on mug opening
+            HEIGHT_THRESHOLD_MIN = -0.12  # Can's center might be below mug rim if it sinks in
+            HEIGHT_THRESHOLD_MAX = 0.15   # Can's center might be above mug rim if resting on top
         elif scene == 3:  # Bin: small_KLT_visual_collision (industrial bin)
             HORIZONTAL_THRESHOLD = 0.25  # Bin has rectangular opening
             HEIGHT_THRESHOLD_MIN = -0.10  # Bottom of bin

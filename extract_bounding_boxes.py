@@ -82,6 +82,45 @@ def get_bounding_box(rigid_body):
             else:
                 print(f"    [get_bounding_box] No root_physx_view")
 
+        # Fallback: compute bounding box from USD stage geometry
+        if 'dimensions' not in bbox_info:
+            print(f"    [get_bounding_box] No AABB from physics, trying USD BBoxCache...")
+            try:
+                import omni.usd
+                from pxr import UsdGeom, Usd
+
+                stage = omni.usd.get_context().get_stage()
+                # Resolve prim path: replace {ENV_REGEX_NS} with actual env path
+                prim_path = rigid_body.cfg.prim_path.replace(
+                    "{ENV_REGEX_NS}", "/World/envs/env_0"
+                )
+                print(f"    [get_bounding_box] Looking up USD prim: {prim_path}")
+                prim = stage.GetPrimAtPath(prim_path)
+
+                if prim.IsValid():
+                    bbox_cache = UsdGeom.BBoxCache(
+                        Usd.TimeCode.Default(), [UsdGeom.Tokens.default_]
+                    )
+                    bbox = bbox_cache.ComputeWorldBound(prim)
+                    bbox_range = bbox.ComputeAlignedRange()
+                    bbox_min = bbox_range.GetMin()
+                    bbox_max = bbox_range.GetMax()
+
+                    aabb_min = [bbox_min[0], bbox_min[1], bbox_min[2]]
+                    aabb_max = [bbox_max[0], bbox_max[1], bbox_max[2]]
+                    dimensions = [aabb_max[i] - aabb_min[i] for i in range(3)]
+                    extents = [d / 2 for d in dimensions]
+
+                    bbox_info["aabb_min"] = aabb_min
+                    bbox_info["aabb_max"] = aabb_max
+                    bbox_info["dimensions"] = dimensions
+                    bbox_info["extents"] = extents
+                    print(f"    [get_bounding_box] USD dimensions: {dimensions}")
+                else:
+                    print(f"    [get_bounding_box] Prim not valid at {prim_path}")
+            except Exception as usd_err:
+                print(f"    [get_bounding_box] USD fallback failed: {usd_err}")
+
         # If we have geometry data
         print(f"    [get_bounding_box] Checking for mass...")
         if hasattr(rigid_body, 'data') and hasattr(rigid_body.data, 'default_mass'):

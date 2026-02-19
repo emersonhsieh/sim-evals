@@ -11,6 +11,7 @@ dependencies = [
   "isaaclab[all,isaacsim]==2.2.0",
   "tyro>=0.9.17",
   "websockets>=16.0",
+  "opencv-python>=4.11.0.86",
 ]
 
 [tool.uv]

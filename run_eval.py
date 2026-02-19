@@ -44,9 +44,9 @@ def check_task_success(env, scene: int, debug: bool = True) -> bool:
         # Define object pairs for each scene (target_object, container_object)
         # Note: Object names from scene USD files (found via debug_scene_objects.py)
         scene_objects = {
-            1: ("rubiks_cube", "_24_bowl"),  # Scene 1: cube in bowl
-            2: ("can", "mug"),               # Scene 2: can in mug (adjust names if needed)
-            3: ("banana", "bin"),            # Scene 3: banana in bin (adjust names if needed)
+            1: ("rubiks_cube", "_24_bowl"),                      # Scene 1: cube in bowl
+            2: ("_10_potted_meat_can", "_25_mug"),              # Scene 2: can in mug
+            3: ("_11_banana", "small_KLT_visual_collision"),   # Scene 3: banana in bin
         }
 
         if scene not in scene_objects:

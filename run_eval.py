@@ -103,12 +103,31 @@ def check_task_success(env, scene: int, debug: bool = True) -> bool:
                          (target_pos[1] - container_pos[1])**2)**0.5
         height_diff = target_pos[2] - container_pos[2]
 
-        # Success criteria (adjusted for container sizes)
-        # Note: These compare CENTER positions, so we need generous thresholds
-        # to account for the actual radius of bowls/mugs/bins
-        HORIZONTAL_THRESHOLD = 0.35  # 35cm horizontal tolerance (bowl/mug/bin radius)
-        HEIGHT_THRESHOLD_MIN = -0.10  # Can be 10cm below container center
-        HEIGHT_THRESHOLD_MAX = 0.30   # Can be up to 30cm above container center
+        # Success criteria (scene-specific, based on container dimensions)
+        # Note: These compare CENTER positions, so thresholds account for container radius
+        #
+        # To get EXACT thresholds, run: uv run python extract_bounding_boxes.py
+        # This will extract actual bounding boxes from the simulation
+        #
+        # Current values tuned based on actual test runs:
+
+        if scene == 1:  # Bowl: _24_bowl (confirmed: cube at 0.259m dist was IN bowl)
+            HORIZONTAL_THRESHOLD = 0.30  # Bowl has large opening radius
+            HEIGHT_THRESHOLD_MIN = -0.10  # Bottom of bowl
+            HEIGHT_THRESHOLD_MAX = 0.20   # Top of bowl opening
+        elif scene == 2:  # Mug: _25_mug (typical mug dimensions)
+            HORIZONTAL_THRESHOLD = 0.10  # Mug has smaller opening
+            HEIGHT_THRESHOLD_MIN = -0.08  # Bottom of mug
+            HEIGHT_THRESHOLD_MAX = 0.12   # Top of mug opening
+        elif scene == 3:  # Bin: small_KLT_visual_collision (industrial bin)
+            HORIZONTAL_THRESHOLD = 0.25  # Bin has rectangular opening
+            HEIGHT_THRESHOLD_MIN = -0.10  # Bottom of bin
+            HEIGHT_THRESHOLD_MAX = 0.15   # Top of bin
+        else:
+            # Fallback (generous)
+            HORIZONTAL_THRESHOLD = 0.35
+            HEIGHT_THRESHOLD_MIN = -0.10
+            HEIGHT_THRESHOLD_MAX = 0.30
 
         is_inside = (horizontal_dist < HORIZONTAL_THRESHOLD and
                     HEIGHT_THRESHOLD_MIN < height_diff < HEIGHT_THRESHOLD_MAX)

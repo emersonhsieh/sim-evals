@@ -42,10 +42,11 @@ def check_task_success(env, scene: int, debug: bool = True) -> bool:
     """
     try:
         # Define object pairs for each scene (target_object, container_object)
+        # Note: Object names from scene USD files (found via debug_scene_objects.py)
         scene_objects = {
-            1: ("Cube", "Bowl"),
-            2: ("Can", "Mug"),
-            3: ("Banana", "Bin"),
+            1: ("rubiks_cube", "_24_bowl"),  # Scene 1: cube in bowl
+            2: ("can", "mug"),               # Scene 2: can in mug (adjust names if needed)
+            3: ("banana", "bin"),            # Scene 3: banana in bin (adjust names if needed)
         }
 
         if scene not in scene_objects:
@@ -58,48 +59,31 @@ def check_task_success(env, scene: int, debug: bool = True) -> bool:
             print(f"  [DEBUG] Looking for objects: {target_name}, {container_name}")
             print(f"  [DEBUG] Available scene attributes: {[x for x in dir(env.env.scene) if not x.startswith('_')][:10]}")
 
-        # Try multiple ways to access objects
+        # Access objects from rigid_objects dictionary
         target = None
         container = None
 
-        # Method 1: Direct attribute access
-        if hasattr(env.env.scene, target_name):
-            target = getattr(env.env.scene, target_name)
-            if debug:
-                print(f"  [DEBUG] Found {target_name} via hasattr")
+        # Objects are stored in env.env.scene.rigid_objects dictionary
+        if hasattr(env.env.scene, 'rigid_objects'):
+            rigid_objects = env.env.scene.rigid_objects
 
-        if hasattr(env.env.scene, container_name):
-            container = getattr(env.env.scene, container_name)
             if debug:
-                print(f"  [DEBUG] Found {container_name} via hasattr")
+                print(f"  [DEBUG] Available rigid objects: {list(rigid_objects.keys())}")
 
-        # Method 2: Try with 'scene/' prefix
-        if target is None:
-            try:
-                target = env.env.scene[f"scene/{target_name}"]
+            # Try to get target object
+            if target_name in rigid_objects:
+                target = rigid_objects[target_name]
                 if debug:
-                    print(f"  [DEBUG] Found {target_name} with scene/ prefix")
-            except:
-                pass
+                    print(f"  [DEBUG] Found {target_name} in rigid_objects")
 
-        if container is None:
-            try:
-                container = env.env.scene[f"scene/{container_name}"]
+            # Try to get container object
+            if container_name in rigid_objects:
+                container = rigid_objects[container_name]
                 if debug:
-                    print(f"  [DEBUG] Found {container_name} with scene/ prefix")
-            except:
-                pass
-
-        # Method 3: Try lowercase
-        if target is None and hasattr(env.env.scene, target_name.lower()):
-            target = getattr(env.env.scene, target_name.lower())
+                    print(f"  [DEBUG] Found {container_name} in rigid_objects")
+        else:
             if debug:
-                print(f"  [DEBUG] Found {target_name.lower()} via lowercase")
-
-        if container is None and hasattr(env.env.scene, container_name.lower()):
-            container = getattr(env.env.scene, container_name.lower())
-            if debug:
-                print(f"  [DEBUG] Found {container_name.lower()} via lowercase")
+                print(f"  [DEBUG] env.env.scene.rigid_objects not found!")
 
         if target is None or container is None:
             print(f"  ✗ Could not find objects in scene (target={target is not None}, container={container is not None})")
@@ -253,7 +237,7 @@ def main(
                     break
 
             # Check actual task success based on object positions
-            task_success = check_task_success(env, scene)
+            task_success = check_task_success(env, scene, debug=(ep == 0))  # Debug on first episode only
 
             # Save episode state log
             state_log_file = state_logs_dir / f"episode_{ep}_state.json"

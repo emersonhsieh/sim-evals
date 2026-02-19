@@ -103,10 +103,12 @@ def check_task_success(env, scene: int, debug: bool = True) -> bool:
                          (target_pos[1] - container_pos[1])**2)**0.5
         height_diff = target_pos[2] - container_pos[2]
 
-        # Success criteria (adjust these thresholds as needed)
-        HORIZONTAL_THRESHOLD = 0.15  # 15cm horizontal tolerance
-        HEIGHT_THRESHOLD_MIN = -0.05  # Can be slightly below container
-        HEIGHT_THRESHOLD_MAX = 0.20   # Can be up to 20cm above container (just dropped in)
+        # Success criteria (adjusted for container sizes)
+        # Note: These compare CENTER positions, so we need generous thresholds
+        # to account for the actual radius of bowls/mugs/bins
+        HORIZONTAL_THRESHOLD = 0.35  # 35cm horizontal tolerance (bowl/mug/bin radius)
+        HEIGHT_THRESHOLD_MIN = -0.10  # Can be 10cm below container center
+        HEIGHT_THRESHOLD_MAX = 0.30   # Can be up to 30cm above container center
 
         is_inside = (horizontal_dist < HORIZONTAL_THRESHOLD and
                     HEIGHT_THRESHOLD_MIN < height_diff < HEIGHT_THRESHOLD_MAX)
@@ -242,13 +244,13 @@ def main(
             # Save episode state log
             state_log_file = state_logs_dir / f"episode_{ep}_state.json"
             state_log_data = {
-                "episode": ep,
-                "instruction": instruction,
-                "scene": scene,
-                "num_steps": step_count,
-                "terminated": terminated,
-                "truncated": truncated,
-                "success": task_success,  # TRUE success based on object positions
+                "episode": int(ep),
+                "instruction": str(instruction),
+                "scene": int(scene),
+                "num_steps": int(step_count),
+                "terminated": bool(terminated),  # Convert numpy bool_ to Python bool
+                "truncated": bool(truncated),    # Convert numpy bool_ to Python bool
+                "success": bool(task_success),   # Ensure Python bool
                 "states": episode_states,
             }
 

@@ -32,7 +32,7 @@ from tqdm import tqdm
 from sim_evals.inference.droid_jointpos import Client as DroidJointPosClient
 
 
-def check_task_success(env, scene: int) -> bool:
+def check_task_success(env, scene: int, debug: bool = True) -> bool:
     """
     Check if the task was successfully completed based on object positions.
 
@@ -49,49 +49,98 @@ def check_task_success(env, scene: int) -> bool:
         }
 
         if scene not in scene_objects:
+            print(f"  ✗ Invalid scene: {scene}")
             return False
 
         target_name, container_name = scene_objects[scene]
 
-        # Get object positions from environment scene
-        # Objects are registered as rigid bodies in the scene
-        if hasattr(env.env.scene, target_name) and hasattr(env.env.scene, container_name):
-            target = env.env.scene[target_name]
-            container = env.env.scene[container_name]
+        if debug:
+            print(f"  [DEBUG] Looking for objects: {target_name}, {container_name}")
+            print(f"  [DEBUG] Available scene attributes: {[x for x in dir(env.env.scene) if not x.startswith('_')][:10]}")
 
-            # Get positions (center of mass)
-            target_pos = target.data.root_pos_w[0].cpu().numpy()  # [x, y, z]
-            container_pos = container.data.root_pos_w[0].cpu().numpy()  # [x, y, z]
+        # Try multiple ways to access objects
+        target = None
+        container = None
 
-            # Check if target is inside container (simple distance + height check)
-            # Object is "in" container if:
-            # 1. Horizontal distance is small (within container radius)
-            # 2. Height is close to or below container height
+        # Method 1: Direct attribute access
+        if hasattr(env.env.scene, target_name):
+            target = getattr(env.env.scene, target_name)
+            if debug:
+                print(f"  [DEBUG] Found {target_name} via hasattr")
 
-            horizontal_dist = ((target_pos[0] - container_pos[0])**2 +
-                             (target_pos[1] - container_pos[1])**2)**0.5
-            height_diff = target_pos[2] - container_pos[2]
+        if hasattr(env.env.scene, container_name):
+            container = getattr(env.env.scene, container_name)
+            if debug:
+                print(f"  [DEBUG] Found {container_name} via hasattr")
 
-            # Success criteria (adjust these thresholds as needed)
-            HORIZONTAL_THRESHOLD = 0.15  # 15cm horizontal tolerance
-            HEIGHT_THRESHOLD_MIN = -0.05  # Can be slightly below container
-            HEIGHT_THRESHOLD_MAX = 0.20   # Can be up to 20cm above container (just dropped in)
+        # Method 2: Try with 'scene/' prefix
+        if target is None:
+            try:
+                target = env.env.scene[f"scene/{target_name}"]
+                if debug:
+                    print(f"  [DEBUG] Found {target_name} with scene/ prefix")
+            except:
+                pass
 
-            is_inside = (horizontal_dist < HORIZONTAL_THRESHOLD and
-                        HEIGHT_THRESHOLD_MIN < height_diff < HEIGHT_THRESHOLD_MAX)
+        if container is None:
+            try:
+                container = env.env.scene[f"scene/{container_name}"]
+                if debug:
+                    print(f"  [DEBUG] Found {container_name} with scene/ prefix")
+            except:
+                pass
 
-            if is_inside:
-                print(f"  ✓ Success detected: {target_name} is in {container_name}")
-                print(f"    Horizontal distance: {horizontal_dist:.3f}m, Height diff: {height_diff:.3f}m")
+        # Method 3: Try lowercase
+        if target is None and hasattr(env.env.scene, target_name.lower()):
+            target = getattr(env.env.scene, target_name.lower())
+            if debug:
+                print(f"  [DEBUG] Found {target_name.lower()} via lowercase")
 
-            return is_inside
-        else:
-            # Objects not found in scene, fall back to termination flag
-            print(f"  Warning: Could not find {target_name} or {container_name} in scene")
+        if container is None and hasattr(env.env.scene, container_name.lower()):
+            container = getattr(env.env.scene, container_name.lower())
+            if debug:
+                print(f"  [DEBUG] Found {container_name.lower()} via lowercase")
+
+        if target is None or container is None:
+            print(f"  ✗ Could not find objects in scene (target={target is not None}, container={container is not None})")
+            print(f"    Hint: Run debug_scene_objects.py to find correct object names")
             return False
 
+        # Get positions (center of mass)
+        target_pos = target.data.root_pos_w[0].cpu().numpy()  # [x, y, z]
+        container_pos = container.data.root_pos_w[0].cpu().numpy()  # [x, y, z]
+
+        if debug:
+            print(f"  [DEBUG] {target_name} position: {target_pos}")
+            print(f"  [DEBUG] {container_name} position: {container_pos}")
+
+        # Check if target is inside container
+        horizontal_dist = ((target_pos[0] - container_pos[0])**2 +
+                         (target_pos[1] - container_pos[1])**2)**0.5
+        height_diff = target_pos[2] - container_pos[2]
+
+        # Success criteria (adjust these thresholds as needed)
+        HORIZONTAL_THRESHOLD = 0.15  # 15cm horizontal tolerance
+        HEIGHT_THRESHOLD_MIN = -0.05  # Can be slightly below container
+        HEIGHT_THRESHOLD_MAX = 0.20   # Can be up to 20cm above container (just dropped in)
+
+        is_inside = (horizontal_dist < HORIZONTAL_THRESHOLD and
+                    HEIGHT_THRESHOLD_MIN < height_diff < HEIGHT_THRESHOLD_MAX)
+
+        if is_inside:
+            print(f"  ✓ Success detected: {target_name} is in {container_name}")
+            print(f"    Horizontal distance: {horizontal_dist:.3f}m, Height diff: {height_diff:.3f}m")
+        else:
+            print(f"  ✗ Task failed: {target_name} not in {container_name}")
+            print(f"    Horizontal distance: {horizontal_dist:.3f}m (threshold: {HORIZONTAL_THRESHOLD:.3f}m)")
+            print(f"    Height diff: {height_diff:.3f}m (range: {HEIGHT_THRESHOLD_MIN:.3f}m to {HEIGHT_THRESHOLD_MAX:.3f}m)")
+
+        return is_inside
+
     except Exception as e:
-        print(f"  Warning: Error checking task success: {e}")
+        print(f"  ✗ Error checking task success: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -171,10 +220,26 @@ def main(
 
                 # Log robot state (before taking action)
                 robot_state = obs["policy"]
+
+                # Extract joint positions (handle different tensor shapes)
+                arm_joint_pos_tensor = robot_state["arm_joint_pos"]
+                gripper_pos_tensor = robot_state["gripper_pos"]
+
+                # Check if already has batch dimension or needs indexing
+                if arm_joint_pos_tensor.dim() == 1:
+                    arm_joint_pos = arm_joint_pos_tensor.cpu().numpy().tolist()
+                else:
+                    arm_joint_pos = arm_joint_pos_tensor[0].cpu().numpy().tolist()
+
+                if gripper_pos_tensor.dim() == 1:
+                    gripper_pos = gripper_pos_tensor.cpu().numpy().tolist()
+                else:
+                    gripper_pos = gripper_pos_tensor[0].cpu().numpy().tolist()
+
                 state_entry = {
                     "step": step_idx,
-                    "arm_joint_pos": robot_state["arm_joint_pos"][0].cpu().numpy().tolist(),
-                    "gripper_pos": robot_state["gripper_pos"][0].cpu().numpy().tolist(),
+                    "arm_joint_pos": arm_joint_pos,
+                    "gripper_pos": gripper_pos,
                     "action": ret["action"].tolist(),
                 }
                 episode_states.append(state_entry)

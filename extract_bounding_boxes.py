@@ -40,16 +40,23 @@ def get_bounding_box(rigid_body):
         if hasattr(rigid_body.data, 'body_aabb_w'):
             print(f"    [get_bounding_box] Found body_aabb_w, extracting...")
             # AABB (Axis-Aligned Bounding Box) in world frame
-            aabb = rigid_body.data.body_aabb_w[0].cpu().numpy()
-            bbox_info["aabb_min"] = aabb[:3].tolist()
-            bbox_info["aabb_max"] = aabb[3:].tolist()
+            # Shape: (num_envs, num_bodies, 6) where 6 = [min_x, min_y, min_z, max_x, max_y, max_z]
+            aabb_all = rigid_body.data.body_aabb_w[0].cpu().numpy()  # (num_bodies, 6)
+            print(f"    [get_bounding_box] body_aabb_w shape (after env index): {aabb_all.shape}")
+
+            # Compute union AABB across all bodies
+            aabb_min = aabb_all[:, :3].min(axis=0)  # min of all body mins
+            aabb_max = aabb_all[:, 3:].max(axis=0)  # max of all body maxes
+
+            bbox_info["aabb_min"] = aabb_min.tolist()
+            bbox_info["aabb_max"] = aabb_max.tolist()
 
             # Calculate extents (half-widths)
-            extents = (aabb[3:] - aabb[:3]) / 2
+            extents = (aabb_max - aabb_min) / 2
             bbox_info["extents"] = extents.tolist()
 
             # Calculate dimensions
-            dimensions = aabb[3:] - aabb[:3]
+            dimensions = aabb_max - aabb_min
             bbox_info["dimensions"] = dimensions.tolist()
             print(f"    [get_bounding_box] Extracted dimensions: {dimensions}")
 

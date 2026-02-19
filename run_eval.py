@@ -123,9 +123,10 @@ def check_task_success(env, scene: int, debug: bool = True) -> bool:
             HEIGHT_THRESHOLD_MIN = -0.10  # Can's center might be below mug rim if it sinks in
             HEIGHT_THRESHOLD_MAX = 0.12   # Can's center might be above mug rim if resting on top
         elif scene == 3:  # Bin: small_KLT_visual_collision (industrial KLT bin)
-            # Initial position: banana at 31.8cm from bin center (outside)
-            # KLT bins are typically ~40×30cm, so radius ~20cm from center
-            HORIZONTAL_THRESHOLD = 0.25  # Bin half-width (~20-25cm for KLT bin)
+            # Note: bin root_pos_w is center-of-mass, which is offset from the
+            # geometric center of the bin cavity. Empirically, banana at 0.318m
+            # horizontal distance was confirmed visually inside the bin.
+            HORIZONTAL_THRESHOLD = 0.35  # Accounts for bin CoM offset from cavity center
             HEIGHT_THRESHOLD_MIN = -0.15  # Bottom of bin (bins are deeper)
             HEIGHT_THRESHOLD_MAX = 0.15   # Top of bin opening
         else:

@@ -24,6 +24,7 @@ import gymnasium as gym
 import torch
 import cv2
 import mediapy
+import json
 from datetime import datetime
 from pathlib import Path
 from tqdm import tqdm
@@ -79,21 +80,65 @@ def main(
 
     video_dir = Path("runs") / datetime.now().strftime("%Y-%m-%d") / datetime.now().strftime("%H-%M-%S")
     video_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create state_logs directory for robot sensor data
+    state_logs_dir = video_dir / "state_logs"
+    state_logs_dir.mkdir(parents=True, exist_ok=True)
+
     video = []
     ep = 0
     max_steps = env.env.max_episode_length
     with torch.no_grad():
         for ep in range(episodes):
-            for _ in tqdm(range(max_steps), desc=f"Episode {ep+1}/{episodes}"):
+            # Initialize episode state log
+            episode_states = []
+            step_count = 0
+            terminated = False
+            truncated = False
+
+            for step_idx in tqdm(range(max_steps), desc=f"Episode {ep+1}/{episodes}"):
                 ret = client.infer(obs, instruction)
                 if not headless:
                     cv2.imshow("Right Camera", cv2.cvtColor(ret["viz"], cv2.COLOR_RGB2BGR))
                     cv2.waitKey(1)
                 video.append(ret["viz"])
                 action = torch.tensor(ret["action"])[None]
+
+                # Log robot state (before taking action)
+                robot_state = obs["policy"]
+                state_entry = {
+                    "step": step_idx,
+                    "arm_joint_pos": robot_state["arm_joint_pos"][0].cpu().numpy().tolist(),
+                    "gripper_pos": robot_state["gripper_pos"][0].cpu().numpy().tolist(),
+                    "action": ret["action"].tolist(),
+                }
+                episode_states.append(state_entry)
+
                 obs, _, term, trunc, _ = env.step(action)
+                step_count += 1
+                terminated = bool(term)
+                truncated = bool(trunc)
+
                 if term or trunc:
                     break
+
+            # Save episode state log
+            state_log_file = state_logs_dir / f"episode_{ep}_state.json"
+            state_log_data = {
+                "episode": ep,
+                "instruction": instruction,
+                "scene": scene,
+                "num_steps": step_count,
+                "terminated": terminated,
+                "truncated": truncated,
+                "success": terminated,  # Assuming termination means success
+                "states": episode_states,
+            }
+
+            with open(state_log_file, 'w') as f:
+                json.dump(state_log_data, f, indent=2)
+
+            print(f"  Saved state log: {state_log_file.name} ({step_count} steps)")
 
             client.reset()
             mediapy.write_video(

@@ -32,6 +32,69 @@ from tqdm import tqdm
 from sim_evals.inference.droid_jointpos import Client as DroidJointPosClient
 
 
+def check_task_success(env, scene: int) -> bool:
+    """
+    Check if the task was successfully completed based on object positions.
+
+    Scene 1: Cube in bowl - check if cube is inside bowl bounds
+    Scene 2: Can in mug - check if can is inside mug bounds
+    Scene 3: Banana in bin - check if banana is inside bin bounds
+    """
+    try:
+        # Define object pairs for each scene (target_object, container_object)
+        scene_objects = {
+            1: ("Cube", "Bowl"),
+            2: ("Can", "Mug"),
+            3: ("Banana", "Bin"),
+        }
+
+        if scene not in scene_objects:
+            return False
+
+        target_name, container_name = scene_objects[scene]
+
+        # Get object positions from environment scene
+        # Objects are registered as rigid bodies in the scene
+        if hasattr(env.env.scene, target_name) and hasattr(env.env.scene, container_name):
+            target = env.env.scene[target_name]
+            container = env.env.scene[container_name]
+
+            # Get positions (center of mass)
+            target_pos = target.data.root_pos_w[0].cpu().numpy()  # [x, y, z]
+            container_pos = container.data.root_pos_w[0].cpu().numpy()  # [x, y, z]
+
+            # Check if target is inside container (simple distance + height check)
+            # Object is "in" container if:
+            # 1. Horizontal distance is small (within container radius)
+            # 2. Height is close to or below container height
+
+            horizontal_dist = ((target_pos[0] - container_pos[0])**2 +
+                             (target_pos[1] - container_pos[1])**2)**0.5
+            height_diff = target_pos[2] - container_pos[2]
+
+            # Success criteria (adjust these thresholds as needed)
+            HORIZONTAL_THRESHOLD = 0.15  # 15cm horizontal tolerance
+            HEIGHT_THRESHOLD_MIN = -0.05  # Can be slightly below container
+            HEIGHT_THRESHOLD_MAX = 0.20   # Can be up to 20cm above container (just dropped in)
+
+            is_inside = (horizontal_dist < HORIZONTAL_THRESHOLD and
+                        HEIGHT_THRESHOLD_MIN < height_diff < HEIGHT_THRESHOLD_MAX)
+
+            if is_inside:
+                print(f"  ✓ Success detected: {target_name} is in {container_name}")
+                print(f"    Horizontal distance: {horizontal_dist:.3f}m, Height diff: {height_diff:.3f}m")
+
+            return is_inside
+        else:
+            # Objects not found in scene, fall back to termination flag
+            print(f"  Warning: Could not find {target_name} or {container_name} in scene")
+            return False
+
+    except Exception as e:
+        print(f"  Warning: Error checking task success: {e}")
+        return False
+
+
 def main(
         episodes:int = 10,
         headless: bool = True,
@@ -88,6 +151,8 @@ def main(
     video = []
     ep = 0
     max_steps = env.env.max_episode_length
+    success_count = 0  # Track successful episodes
+
     with torch.no_grad():
         for ep in range(episodes):
             # Initialize episode state log
@@ -122,6 +187,9 @@ def main(
                 if term or trunc:
                     break
 
+            # Check actual task success based on object positions
+            task_success = check_task_success(env, scene)
+
             # Save episode state log
             state_log_file = state_logs_dir / f"episode_{ep}_state.json"
             state_log_data = {
@@ -131,14 +199,20 @@ def main(
                 "num_steps": step_count,
                 "terminated": terminated,
                 "truncated": truncated,
-                "success": terminated,  # Assuming termination means success
+                "success": task_success,  # TRUE success based on object positions
                 "states": episode_states,
             }
 
             with open(state_log_file, 'w') as f:
                 json.dump(state_log_data, f, indent=2)
 
-            print(f"  Saved state log: {state_log_file.name} ({step_count} steps)")
+            # Update success counter
+            if task_success:
+                success_count += 1
+
+            success_str = "✓ SUCCESS" if task_success else "✗ FAILED"
+            print(f"  Episode {ep}: {success_str} ({step_count} steps)")
+            print(f"  Saved state log: {state_log_file.name}")
 
             client.reset()
             mediapy.write_video(
@@ -147,6 +221,27 @@ def main(
                 fps=15,
             )
             video = []
+
+    # Print final summary
+    print("\n" + "=" * 70)
+    print("EVALUATION SUMMARY")
+    print("=" * 70)
+    print(f"Scene: {scene} - \"{instruction}\"")
+    print(f"Episodes: {episodes}")
+    print(f"Success rate: {success_count}/{episodes} ({100*success_count/episodes:.1f}%)")
+    print(f"Results saved to: {video_dir}")
+    print("=" * 70)
+
+    # Save summary file
+    summary_file = video_dir / "summary.json"
+    with open(summary_file, 'w') as f:
+        json.dump({
+            "scene": scene,
+            "instruction": instruction,
+            "total_episodes": episodes,
+            "successful_episodes": success_count,
+            "success_rate": success_count / episodes if episodes > 0 else 0,
+        }, f, indent=2)
 
     env.close()
     simulation_app.close()

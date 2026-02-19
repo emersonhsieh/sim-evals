@@ -24,8 +24,10 @@ def get_bounding_box(rigid_body):
         dict: Contains 'center', 'extents', 'min', 'max' in world coordinates
     """
     try:
+        print(f"    [get_bounding_box] Getting position...")
         # Get position (center of mass)
         pos = rigid_body.data.root_pos_w[0].cpu().numpy()
+        print(f"    [get_bounding_box] Position: {pos}")
 
         # Try to get bounding box extents
         # In Isaac Sim, this might be in different attributes
@@ -34,7 +36,9 @@ def get_bounding_box(rigid_body):
         }
 
         # Check various possible attributes for bounding box
+        print(f"    [get_bounding_box] Checking for body_aabb_w...")
         if hasattr(rigid_body.data, 'body_aabb_w'):
+            print(f"    [get_bounding_box] Found body_aabb_w, extracting...")
             # AABB (Axis-Aligned Bounding Box) in world frame
             aabb = rigid_body.data.body_aabb_w[0].cpu().numpy()
             bbox_info["aabb_min"] = aabb[:3].tolist()
@@ -47,27 +51,43 @@ def get_bounding_box(rigid_body):
             # Calculate dimensions
             dimensions = aabb[3:] - aabb[:3]
             bbox_info["dimensions"] = dimensions.tolist()
+            print(f"    [get_bounding_box] Extracted dimensions: {dimensions}")
 
-        elif hasattr(rigid_body, 'root_physx_view'):
-            # Try to get from PhysX view
-            view = rigid_body.root_physx_view
-            if hasattr(view, 'get_aabbs'):
-                aabb = view.get_aabbs()[0]
-                bbox_info["aabb_min"] = aabb[:3].tolist()
-                bbox_info["aabb_max"] = aabb[3:].tolist()
+        else:
+            print(f"    [get_bounding_box] No body_aabb_w, checking root_physx_view...")
+            if hasattr(rigid_body, 'root_physx_view'):
+                # Try to get from PhysX view
+                view = rigid_body.root_physx_view
+                print(f"    [get_bounding_box] Found root_physx_view, checking get_aabbs...")
+                if hasattr(view, 'get_aabbs'):
+                    print(f"    [get_bounding_box] Calling get_aabbs()...")
+                    aabb = view.get_aabbs()[0]
+                    bbox_info["aabb_min"] = aabb[:3].tolist()
+                    bbox_info["aabb_max"] = aabb[3:].tolist()
 
-                extents = (aabb[3:] - aabb[:3]) / 2
-                bbox_info["extents"] = extents.tolist()
-                dimensions = aabb[3:] - aabb[:3]
-                bbox_info["dimensions"] = dimensions.tolist()
+                    extents = (aabb[3:] - aabb[:3]) / 2
+                    bbox_info["extents"] = extents.tolist()
+                    dimensions = aabb[3:] - aabb[:3]
+                    bbox_info["dimensions"] = dimensions.tolist()
+                    print(f"    [get_bounding_box] Extracted dimensions: {dimensions}")
+                else:
+                    print(f"    [get_bounding_box] No get_aabbs method")
+            else:
+                print(f"    [get_bounding_box] No root_physx_view")
 
         # If we have geometry data
+        print(f"    [get_bounding_box] Checking for mass...")
         if hasattr(rigid_body, 'data') and hasattr(rigid_body.data, 'default_mass'):
             bbox_info["mass"] = float(rigid_body.data.default_mass[0])
+            print(f"    [get_bounding_box] Mass: {bbox_info['mass']}")
 
+        print(f"    [get_bounding_box] Done, returning bbox_info")
         return bbox_info
 
     except Exception as e:
+        print(f"    [get_bounding_box] ERROR: {e}")
+        import traceback
+        traceback.print_exc()
         return {"error": str(e)}
 
 
@@ -100,14 +120,24 @@ def main(scene: int = 1):
     print('='*70)
 
     # Initialize env for this scene
+    print(f"[DEBUG] Step 1: Parsing env config...")
     env_cfg = parse_env_cfg("DROID", device=args_cli.device, num_envs=1, use_fabric=True)
+    print(f"[DEBUG] Step 2: Setting scene to {scene}...")
     env_cfg.set_scene(scene)
+    print(f"[DEBUG] Step 3: Creating gym environment...")
     env = gym.make("DROID", cfg=env_cfg)
+    print(f"[DEBUG] Step 4: Environment created successfully")
 
+    print(f"[DEBUG] Step 5: First reset...")
     obs, _ = env.reset()
-    obs, _ = env.reset()  # Second reset for materials
+    print(f"[DEBUG] Step 6: First reset completed")
+
+    print(f"[DEBUG] Step 7: Second reset (for materials)...")
+    obs, _ = env.reset()
+    print(f"[DEBUG] Step 8: Second reset completed")
 
     target_name, container_name = scene_containers[scene]
+    print(f"[DEBUG] Step 9: Target={target_name}, Container={container_name}")
 
     if True:  # Keep indentation for compatibility
         scene_num = scene
@@ -123,13 +153,19 @@ def main(scene: int = 1):
         }
 
         # Get rigid objects
+        print(f"[DEBUG] Step 10: Checking for rigid_objects...")
         if hasattr(env.env.scene, 'rigid_objects'):
+            print(f"[DEBUG] Step 11: Found rigid_objects, accessing...")
             rigid_objects = env.env.scene.rigid_objects
+            print(f"[DEBUG] Step 12: Available objects: {list(rigid_objects.keys())}")
 
             # Extract target bounding box
+            print(f"[DEBUG] Step 13: Extracting target ({target_name}) bounding box...")
             if target_name in rigid_objects:
                 target = rigid_objects[target_name]
+                print(f"[DEBUG] Step 14: Got target object, calling get_bounding_box...")
                 target_bbox = get_bounding_box(target)
+                print(f"[DEBUG] Step 15: Target bounding box extracted")
                 scene_data["target_bbox"] = target_bbox
 
                 print(f"\n{target_name}:")
@@ -144,9 +180,12 @@ def main(scene: int = 1):
                 print(f"  ✗ Could not find {target_name}")
 
             # Extract container bounding box
+            print(f"[DEBUG] Step 16: Extracting container ({container_name}) bounding box...")
             if container_name in rigid_objects:
                 container = rigid_objects[container_name]
+                print(f"[DEBUG] Step 17: Got container object, calling get_bounding_box...")
                 container_bbox = get_bounding_box(container)
+                print(f"[DEBUG] Step 18: Container bounding box extracted")
                 scene_data["container_bbox"] = container_bbox
 
                 print(f"\n{container_name}:")
@@ -172,7 +211,9 @@ def main(scene: int = 1):
 
     all_bbox_data[f"scene_{scene_num}"] = scene_data
 
+    print(f"[DEBUG] Step 19: Closing environment...")
     env.close()
+    print(f"[DEBUG] Step 20: Environment closed successfully")
 
     # Save bounding box data
     output_file = Path(f"bounding_boxes_scene{scene}.json")

@@ -247,9 +247,19 @@ def main(
                 else:
                     gripper_pos = gripper_pos_tensor[0].cpu().numpy().tolist()
 
+                # Extract joint velocities directly from robot articulation
+                robot = env.env.scene["robot"]
+                arm_joint_names = [f"panda_joint{i}" for i in range(1, 8)]
+                arm_joint_indices = [
+                    i for i, name in enumerate(robot.data.joint_names)
+                    if name in arm_joint_names
+                ]
+                arm_joint_vel = robot.data.joint_vel[0, arm_joint_indices].cpu().numpy().tolist()
+
                 state_entry = {
                     "step": step_idx,
                     "arm_joint_pos": arm_joint_pos,
+                    "arm_joint_vel": arm_joint_vel,
                     "gripper_pos": gripper_pos,
                     "action": ret["action"].tolist(),
                 }

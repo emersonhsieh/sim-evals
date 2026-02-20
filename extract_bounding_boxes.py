@@ -90,10 +90,11 @@ def get_bounding_box(rigid_body):
                 from pxr import UsdGeom, Usd
 
                 stage = omni.usd.get_context().get_stage()
-                # Resolve prim path: cfg.prim_path contains a regex pattern
-                # like /World/envs/env_.*/scene/obj — replace env_.* with env_0
-                import re
-                prim_path = re.sub(r"env_\.\*", "env_0", rigid_body.cfg.prim_path)
+                # cfg.prim_path contains a regex pattern (e.g. env_.*)
+                # that can't be used as a USD path. Extract the object name
+                # and construct the path for env_0 directly.
+                obj_name = rigid_body.cfg.prim_path.split("/")[-1]
+                prim_path = f"/World/envs/env_0/scene/{obj_name}"
                 print(f"    [get_bounding_box] Looking up USD prim: {prim_path}")
                 prim = stage.GetPrimAtPath(prim_path)
 

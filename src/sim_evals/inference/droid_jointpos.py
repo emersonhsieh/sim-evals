@@ -8,7 +8,7 @@ from .abstract_client import InferenceClient
 class Client(InferenceClient):
     def __init__(self, 
                 remote_host:str = "localhost", 
-                remote_port:int = 8000,
+                remote_port:int = 8001,
                 open_loop_horizon:int = 8,
                  ) -> None:
         self.open_loop_horizon = open_loop_horizon

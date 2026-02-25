@@ -11,7 +11,7 @@ Then, in a separate terminal, launch the policy server on localhost:8001
 For example, to launch a pi05-DROID policy (with joint position control),
 run the command below in a separate terminal from the openpi directory:
 
-XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 uv run scripts/serve_policy.py policy:checkpoint --policy.config=pi05_droid_jointpos_polaris --policy.dir=gs://openpi-assets/checkpoints/pi05_droid_jointpos
+XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 uv run scripts/serve_policy.py --port 8001 policy:checkpoint --policy.config=pi05_droid_jointpos_polaris --policy.dir=gs://openpi-assets/checkpoints/pi05_droid_jointpos
 
 Finally, run the evaluation script:
 
@@ -25,6 +25,7 @@ import torch
 import cv2
 import mediapy
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 from tqdm import tqdm
@@ -209,6 +210,47 @@ def main(
     state_logs_dir = video_dir / "state_logs"
     state_logs_dir.mkdir(parents=True, exist_ok=True)
 
+    # Resolve end-effector body index
+    robot = env.env.scene["robot"]
+    print(f"Robot body names: {robot.data.body_names}")
+    ee_body_name = "panda_hand"
+    ee_body_idx = None
+    for i, name in enumerate(robot.data.body_names):
+        if name == ee_body_name:
+            ee_body_idx = i
+            break
+    if ee_body_idx is None:
+        # Try panda_link8 as alternative (common in flattened URDFs)
+        for i, name in enumerate(robot.data.body_names):
+            if name == "panda_link8":
+                ee_body_idx = i
+                ee_body_name = "panda_link8"
+                break
+    if ee_body_idx is None:
+        print(f"WARNING: Could not find 'panda_hand' or 'panda_link8' in body_names")
+        print("  Falling back to last panda link as end-effector")
+        # Find last body whose name starts with "panda"
+        for i, name in enumerate(robot.data.body_names):
+            if name.startswith("panda"):
+                ee_body_idx = i
+        if ee_body_idx is None:
+            ee_body_idx = 0
+    print(f"Using end-effector body: '{robot.data.body_names[ee_body_idx]}' (index {ee_body_idx})")
+
+    # Resolve scene object names for per-step tracking
+    scene_objects = {
+        1: ("rubiks_cube", "_24_bowl"),
+        2: ("_10_potted_meat_can", "_25_mug"),
+        3: ("_11_banana", "small_KLT_visual_collision"),
+    }
+    target_obj = None
+    container_obj = None
+    if scene in scene_objects and hasattr(env.env.scene, "rigid_objects"):
+        target_name, container_name = scene_objects[scene]
+        rigid_objects = env.env.scene.rigid_objects
+        target_obj = rigid_objects.get(target_name)
+        container_obj = rigid_objects.get(container_name)
+
     video = []
     ep = 0
     max_steps = env.env.max_episode_length
@@ -223,7 +265,14 @@ def main(
             truncated = False
 
             for step_idx in tqdm(range(max_steps), desc=f"Episode {ep+1}/{episodes}"):
+                # Track whether this step triggers an actual model call vs cached action replay
+                will_call_model = (
+                    client.actions_from_chunk_completed == 0
+                    or client.actions_from_chunk_completed >= client.open_loop_horizon
+                )
+                infer_start = time.perf_counter()
                 ret = client.infer(obs, instruction)
+                infer_duration_ms = (time.perf_counter() - infer_start) * 1000.0
                 if not headless:
                     cv2.imshow("Right Camera", cv2.cvtColor(ret["viz"], cv2.COLOR_RGB2BGR))
                     cv2.waitKey(1)
@@ -248,7 +297,7 @@ def main(
                 else:
                     gripper_pos = gripper_pos_tensor[0].cpu().numpy().tolist()
 
-                # Extract joint velocities directly from robot articulation
+                # Extract joint state directly from robot articulation
                 robot = env.env.scene["robot"]
                 arm_joint_names = [f"panda_joint{i}" for i in range(1, 8)]
                 arm_joint_indices = [
@@ -256,13 +305,45 @@ def main(
                     if name in arm_joint_names
                 ]
                 arm_joint_vel = robot.data.joint_vel[0, arm_joint_indices].cpu().numpy().tolist()
+                arm_joint_acc = robot.data.joint_acc[0, arm_joint_indices].cpu().numpy().tolist()
+                # NOTE: applied_torque and computed_torque are zeros for implicit actuators
+                # (which this robot uses). Logged anyway for completeness / future explicit actuator configs.
+                arm_applied_torque = robot.data.applied_torque[0, arm_joint_indices].cpu().numpy().tolist()
+                arm_computed_torque = robot.data.computed_torque[0, arm_joint_indices].cpu().numpy().tolist()
+
+                # End-effector state
+                # IsaacLab 2.x: body_link_pose_w [x,y,z,qw,qx,qy,qz], body_link_vel_w [vx,vy,vz,wx,wy,wz]
+                # IsaacLab 1.x: body_pos_w [x,y,z] + body_quat_w [qw,qx,qy,qz], body_vel_w [vx,vy,vz,wx,wy,wz]
+                if hasattr(robot.data, "body_link_pose_w"):
+                    ee_pose = robot.data.body_link_pose_w[0, ee_body_idx].cpu().numpy().tolist()
+                    ee_vel = robot.data.body_link_vel_w[0, ee_body_idx].cpu().numpy().tolist()
+                else:
+                    ee_pos = robot.data.body_pos_w[0, ee_body_idx].cpu().numpy().tolist()
+                    ee_quat = robot.data.body_quat_w[0, ee_body_idx].cpu().numpy().tolist()
+                    ee_pose = ee_pos + ee_quat  # [x,y,z,qw,qx,qy,qz]
+                    ee_vel = robot.data.body_vel_w[0, ee_body_idx].cpu().numpy().tolist()
+
+                # Object positions (target and container)
+                obj_positions = {}
+                if target_obj is not None:
+                    obj_positions["target"] = target_obj.data.root_pos_w[0].cpu().numpy().tolist()
+                if container_obj is not None:
+                    obj_positions["container"] = container_obj.data.root_pos_w[0].cpu().numpy().tolist()
 
                 state_entry = {
                     "step": step_idx,
                     "arm_joint_pos": arm_joint_pos,
                     "arm_joint_vel": arm_joint_vel,
+                    "arm_joint_acc": arm_joint_acc,
+                    "arm_applied_torque": arm_applied_torque,
+                    "arm_computed_torque": arm_computed_torque,
                     "gripper_pos": gripper_pos,
+                    "ee_pose": ee_pose,
+                    "ee_vel": ee_vel,
+                    "object_positions": obj_positions,
                     "action": ret["action"].tolist(),
+                    "inference_time_ms": infer_duration_ms,
+                    "model_call": will_call_model,
                 }
                 episode_states.append(state_entry)
 
@@ -278,6 +359,17 @@ def main(
             task_success = check_task_success(env, scene, debug=(ep == 0))  # Debug on first episode only
 
             # Save episode state log
+            # Record constant joint metadata (same for all steps)
+            robot = env.env.scene["robot"]
+            arm_joint_names = [f"panda_joint{i}" for i in range(1, 8)]
+            arm_joint_indices = [
+                i for i, name in enumerate(robot.data.joint_names)
+                if name in arm_joint_names
+            ]
+            arm_default_joint_pos = robot.data.default_joint_pos[0, arm_joint_indices].cpu().numpy().tolist()
+            arm_soft_joint_pos_limits = robot.data.soft_joint_pos_limits[0, arm_joint_indices].cpu().numpy().tolist()
+            arm_soft_joint_vel_limits = robot.data.soft_joint_vel_limits[0, arm_joint_indices].cpu().numpy().tolist()
+
             state_log_file = state_logs_dir / f"episode_{ep}_state.json"
             state_log_data = {
                 "episode": int(ep),
@@ -287,6 +379,9 @@ def main(
                 "terminated": bool(terminated),  # Convert numpy bool_ to Python bool
                 "truncated": bool(truncated),    # Convert numpy bool_ to Python bool
                 "success": bool(task_success),   # Ensure Python bool
+                "arm_default_joint_pos": arm_default_joint_pos,
+                "arm_soft_joint_pos_limits": arm_soft_joint_pos_limits,
+                "arm_soft_joint_vel_limits": arm_soft_joint_vel_limits,
                 "states": episode_states,
             }
 

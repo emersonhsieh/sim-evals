@@ -56,7 +56,7 @@ class Client(InferenceClient):
             }
             self.pred_action_chunk = self.client.infer(request_data)["actions"]
 
-        action = self.pred_action_chunk[self.actions_from_chunk_completed]
+        action = self.pred_action_chunk[self.actions_from_chunk_completed][:8]  # 7 joints + 1 gripper
         self.actions_from_chunk_completed += 1
 
         # binarize gripper action
